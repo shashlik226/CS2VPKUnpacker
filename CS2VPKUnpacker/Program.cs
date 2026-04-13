@@ -28,6 +28,8 @@ public class Program
     }
     public static void CheckVPKFiles(string vpkFile)
     {
+        Console.WriteLine($"\n-------------- {vpkFile} --------------\n");
+
         if (File.Exists(vpkFile + ".bak") && !File.Exists(vpkFile))
         {
             if (GetYesNoInput("Найден только бекап vpk, восстановить?"))
