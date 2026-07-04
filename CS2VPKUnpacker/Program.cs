@@ -6,21 +6,46 @@ public class Program
 {
     static bool ignorePanorama = false;
     static bool debug = false;
+
+    static List<string> ignoreList = new List<string>();
     public static void Main(string[] args)
     {
-        ignorePanorama = GetYesNoInput("Игнорировать файлы panorama?");
+        if(args.Contains("-debug"))
+            debug = true;
+        if(args.Contains("-ignorePanoramaFiles"))
+            ignorePanorama = true;
 
-        if (args.Length == 0 )
+        int ignoreListIndex = Array.IndexOf(args, "-ignore");
+        if (ignoreListIndex != -1 && ignoreListIndex + 1 < args.Length)
         {
-            CheckVPKFiles("csgo/pak01_dir.vpk");
-            return;
+            string filesString = args[ignoreListIndex + 1];
+            string[] files = filesString.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string file in files)
+            {
+                ignoreList.Add(file);
+            }
+            Console.Write($"\nИгнор лист: {filesString}\n");
+        }
+        else
+        {
+            Console.Write("\nИгнор лист пуст\n");
         }
 
-        foreach (string file in args)
+        int vpksIndex = Array.IndexOf(args, "-vpks");
+        if (vpksIndex != -1 && vpksIndex + 1 < args.Length)
         {
-            if (file == "-debug")
-                debug = true;
-            CheckVPKFiles(file + "/pak01_dir.vpk");
+            string foldersString = args[vpksIndex + 1];
+            string[] folders = foldersString.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string file in folders)
+            {
+                CheckVPKFiles(file + "/pak01_dir.vpk");
+            }
+        }
+        else
+        {
+            Console.Write("\nПапки не были указаны");
         }
 
         Console.Write("\n\nНажми любую клавишу для продолжения...");
@@ -36,7 +61,8 @@ public class Program
             {
                 File.Copy(vpkFile + ".bak", vpkFile);
                 File.Delete(vpkFile + ".bak");
-                return;
+                if (!GetYesNoInput("Распаковать VPK?"))
+                    return;
             }
             else
             {
@@ -55,14 +81,12 @@ public class Program
         package.Read(vpkFile);
 
         int filesCount = 0;
-        string fileTypes = "";
         foreach (var entry in package.Entries)
         {
             filesCount += entry.Value.Count;
-            fileTypes += entry.Key + " ";
         }
 
-        Console.WriteLine($"Количество файлов: {filesCount}\nТипы файлов: {fileTypes}");
+        Console.WriteLine($"Количество файлов: {filesCount}");
 
         DateTime unpackStartTime = DateTime.Now;
         foreach (var entry in package.Entries)
@@ -72,32 +96,41 @@ public class Program
                 string file = vpkfolder + item.GetFullPath();
                 string? directory = Path.GetDirectoryName(file);
 
-                if (file.Contains("panorama") && ignorePanorama)
-                    continue;
+                bool fileInIgnoreList = ignoreList.Contains(item.GetFileName()) ||
+                        ((file.Contains("panorama/layout") || file.Contains("panorama/styles") || file.Contains("panorama/scripts")) && ignorePanorama);
 
-                if (!File.Exists(file))
+                bool fileExists = File.Exists(file);
+
+                if (!fileExists || CalculateCrc32FromFile(file) != item.CRC32)
                 {
-                    Console.WriteLine($"{file} не найден");
-
-                    if(directory != null)
-                        Directory.CreateDirectory(directory);
-
-                    package.ReadEntry(item, out byte[] fileContents);
-                    File.WriteAllBytes(file, fileContents);
-                }
-                else if (CalculateCrc32FromFile(file) != item.CRC32)
-                {
-                    Console.WriteLine($"{file} изменен");
+                    if (fileInIgnoreList && fileExists)
+                    {
+                        Console.WriteLine($"{file} ({item.GetFileName()}) проигнорирован");
+                        continue;
+                    }
+                    else if (fileInIgnoreList && !fileExists)
+                    {
+                        Console.WriteLine($"{file} ({item.GetFileName()}) файл в игнор листе, но не существует, записываем");
+                    }
+                    else if (!fileExists)
+                    {
+                        Console.WriteLine($"{file} ({item.GetFileName()}) не найден");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{file} ({item.GetFileName()}) изменен");
+                    }
 
                     if (directory != null)
                         Directory.CreateDirectory(directory);
 
                     package.ReadEntry(item, out byte[] fileContents);
                     File.WriteAllBytes(file, fileContents);
+
                 }
                 else if (debug)
                 {
-                    Console.WriteLine($"{file} прошел проверку");
+                    Console.WriteLine($"{file} ({item.GetFileName()}) прошел проверку");
                 }
             }
         }
@@ -149,6 +182,9 @@ public class Program
 
     public static uint CalculateCrc32FromFile(string filePath)
     {
+        if(!File.Exists(filePath))
+            return 0;
+
         byte[] data = File.ReadAllBytes(filePath);
         return CalculateCrc32(data);
     }
